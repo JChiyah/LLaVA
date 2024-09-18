@@ -250,6 +250,31 @@ conv_vicuna_v1 = Conversation(
     sep=" ",
     sep2="</s>",
 )
+conv_vicuna_v1_bw_source = Conversation(
+    system="A chat between a curious user and an artificial intelligence assistant. "
+           "The assistant gives helpful, detailed, and polite answers to the user's questions. "
+           "Answer only with the bounding box of the block mentioned. The bounding box consists of 4 values between 0 and 1. Here is an example: [0.000, 0.123, 0.075, 0.204].",
+    roles=("USER", "ASSISTANT"),
+    version="v1",
+    messages=(),
+    offset=0,
+    sep_style=SeparatorStyle.TWO,
+    sep=" ",
+    sep2="</s>",
+)
+conv_vicuna_v1_bw_target = Conversation(
+    system="A chat between a curious user and an artificial intelligence assistant. "
+           "The assistant gives helpful, detailed, and polite answers to the user's questions. "
+           "Answer only with the bounding box of the location mentioned. The bounding box consists of 4 values between 0 and 1. Here is an example: [0.000, 0.123, 0.075, 0.204].",
+    roles=("USER", "ASSISTANT"),
+    version="v1",
+    messages=(),
+    offset=0,
+    sep_style=SeparatorStyle.TWO,
+    sep=" ",
+    sep2="</s>",
+)
+
 
 conv_llama_2 = Conversation(
     system="""You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.
@@ -374,6 +399,8 @@ conv_templates = {
     "default": conv_vicuna_v0,
     "v0": conv_vicuna_v0,
     "v1": conv_vicuna_v1,
+    "v1_bw_source": conv_vicuna_v1_bw_source,
+    "v1_bw_target": conv_vicuna_v1_bw_target,
     "vicuna_v1": conv_vicuna_v1,
     "llama_2": conv_llama_2,
     "mistral_instruct": conv_mistral_instruct,

@@ -10,8 +10,9 @@
 ################## VICUNA ##################
 
 ################## LLaMA-2 ##################
-# PROMPT_VERSION="llava_llama_2"
-# MODEL_VERSION="llama-2-7b-chat"
+PROMPT_VERSION="llava_llama_2"
+MODEL_VERSION="llama-2-7b-chat"
+MODEL_VERSION="liuhaotian/llava-v1.6-mistral-7b"
 ################## LLaMA-2 ##################
 
 deepspeed llava/train/train_mem.py \
@@ -46,5 +47,5 @@ deepspeed llava/train/train_mem.py \
     --model_max_length 2048 \
     --gradient_checkpointing True \
     --lazy_preprocess True \
-    --dataloader_num_workers 4 \
-    --report_to wandb
+    --dataloader_num_workers 4
+#    --report_to wandb

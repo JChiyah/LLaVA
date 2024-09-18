@@ -15,6 +15,7 @@
 #    limitations under the License.
 
 import os
+import sys
 import copy
 from dataclasses import dataclass, field
 import json
@@ -36,6 +37,10 @@ from llava.model import *
 from llava.mm_utils import tokenizer_image_token
 
 from PIL import Image
+
+
+sys.path.append('../')
+from bw_modelling import debug_utils, data_modelling
 
 
 local_rank = None
@@ -74,6 +79,9 @@ class DataArguments:
     is_multimodal: bool = False
     image_folder: Optional[str] = field(default=None)
     image_aspect_ratio: str = 'square'
+    turn_masking: Optional[str] = None
+    prompt_task_instruction: str = 'system'
+    debugging: bool = False
 
 
 @dataclass
@@ -353,6 +361,8 @@ def preprocess_llama_2(
 
     # Tokenize conversations
 
+    # print('aaaa')
+    # print(conversations[0])
     if has_image:
         input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors='pt') for prompt in conversations], dim=0)
     else:
@@ -431,9 +441,13 @@ def preprocess_v1(
             role = roles[sentence["from"]]
             assert role == conv.roles[j % 2], f"{i}"
             conv.append_message(role, sentence["value"])
+        # print(conv.get_prompt())
+
         conversations.append(conv.get_prompt())
 
     # Tokenize conversations
+
+    # print(conversations[0])
 
     if has_image:
         input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors='pt') for prompt in conversations], dim=0)
@@ -446,6 +460,7 @@ def preprocess_v1(
             truncation=True,
         ).input_ids
 
+    # print(tokenizer.decode(input_ids[0], skip_special_tokens=True))
     targets = input_ids.clone()
 
     assert conv.sep_style == conversation_lib.SeparatorStyle.TWO
@@ -598,6 +613,7 @@ def preprocess_plain(
         conversation = source[0]['value'] + source[1]['value'] + conversation_lib.default_conversation.sep
         conversations.append(conversation)
     # tokenize conversations
+
     input_ids = [tokenizer_image_token(prompt, tokenizer, return_tensors='pt') for prompt in conversations]
     targets = copy.deepcopy(input_ids)
     for target, source in zip(targets, sources):
@@ -628,6 +644,7 @@ def preprocess(
     if conversation_lib.default_conversation.version == "mpt":
         return preprocess_mpt(sources, tokenizer, has_image=has_image)
     # add end signal and concatenate together
+
     conversations = []
     for source in sources:
         header = f"{conversation_lib.default_conversation.system}\n\n"
@@ -668,6 +685,7 @@ class LazySupervisedDataset(Dataset):
         self.tokenizer = tokenizer
         self.list_data_dict = list_data_dict
         self.data_args = data_args
+        self._printed_examples = False
 
     def __len__(self):
         return len(self.list_data_dict)
@@ -725,6 +743,28 @@ class LazySupervisedDataset(Dataset):
             sources,
             self.tokenizer,
             has_image=('image' in self.list_data_dict[i]))
+
+        if self.data_args.debugging or not self._printed_examples:
+            print(sources)
+            print(f"input_ids: {data_dict['input_ids'][0]}")
+            # JChiyah: after the preprocess, whatever it is, we want to alter the labels to match our evaluations
+            print(f"Decoded input ids: {debug_utils.decode_input_ids(data_dict['input_ids'][0], self.tokenizer, handle_image_token=IMAGE_TOKEN_INDEX)}")
+            print(f"Decoded labels: {debug_utils.decode_label_ids(data_dict['labels'][0], tokenizer=self.tokenizer)}")
+            print(f"labels: {data_dict['labels'][0]}")
+
+        data_dict['labels'] = data_modelling.get_masked_labels(
+            data_dict['input_ids'], sources, self.tokenizer,
+            role_tokens=[('system', '<s>'), ('user', 'USER'), ('assistant', 'ASSISTANT')],
+            token_ids_to_mask=[IMAGE_TOKEN_INDEX])
+
+        if self.data_args.debugging or not self._printed_examples:
+            print(f"AFTER Decoded labels: {debug_utils.decode_label_ids(data_dict['labels'][0], tokenizer=self.tokenizer)}")
+            self._printed_examples = True
+
+        # print(data_dict['input_ids'][0])
+        # print(data_dict.keys())
+        # print(self.tokenizer.decode(data_dict["input_ids"][0], skip_special_tokens=True))
+        # input()
         if isinstance(i, int):
             data_dict = dict(input_ids=data_dict["input_ids"][0],
                              labels=data_dict["labels"][0])
@@ -748,6 +788,7 @@ class DataCollatorForSupervisedDataset(object):
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         input_ids, labels = tuple([instance[key] for instance in instances]
                                   for key in ("input_ids", "labels"))
+        # input(input_ids)
         input_ids = torch.nn.utils.rnn.pad_sequence(
             input_ids,
             batch_first=True,
@@ -757,11 +798,15 @@ class DataCollatorForSupervisedDataset(object):
                                                  padding_value=IGNORE_INDEX)
         input_ids = input_ids[:, :self.tokenizer.model_max_length]
         labels = labels[:, :self.tokenizer.model_max_length]
+
         batch = dict(
             input_ids=input_ids,
             labels=labels,
             attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
         )
+        # print(input_ids[0])
+        # print(labels[0])
+        # print(self.tokenizer.batch_decode(input_ids, skip_special_tokens=True)[0])
 
         if 'image' in instances[0]:
             images = [instance['image'] for instance in instances]
@@ -788,6 +833,8 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,
 def train(attn_implementation=None):
     global local_rank
 
+    transformers.set_seed(124124)
+
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
@@ -798,7 +845,7 @@ def train(attn_implementation=None):
     if training_args.bits in [4, 8]:
         from transformers import BitsAndBytesConfig
         bnb_model_from_pretrained_args.update(dict(
-            device_map={"": training_args.device},
+            # device_map={"": training_args.device},
             load_in_4bit=training_args.bits == 4,
             load_in_8bit=training_args.bits == 8,
             quantization_config=BitsAndBytesConfig(
@@ -912,7 +959,7 @@ def train(attn_implementation=None):
             model_args=model_args,
             fsdp=training_args.fsdp
         )
-        
+
         vision_tower = model.get_vision_tower()
         vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
 
