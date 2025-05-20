@@ -18,26 +18,24 @@ from llava.utils import disable_torch_init
 from llava.mm_utils import tokenizer_image_token, process_images, get_model_name_from_path
 from torch.utils.data import Dataset, DataLoader
 
-# add all helper packages, used or not used here
-sys.path.append('../../block-world-research/')
-sys.path.append('../../block-world-research/bw-correction-dialogues')
-sys.path.append('../../block-world-research/bw-correction-annotations')
-from src import log_utils
-logger = log_utils.get_logger(log_utils.DEBUG)
+# Get script directory
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# Add the blockworld-repairs/src directory to Python path (one level up from this script)
+sys.path.append(os.path.join(os.path.dirname(script_dir), 'src'))
 
-# import evaluate_annotations
-# evaluate_annotations.evaluate_predictions(predictions)
-sys.path.append('../')
-from bw_modelling import evaluation, debug_utils
-import evaluate_bw_results
-import evaluate_annotations
-import data_utils
-import unity_utils
+import bwcore
+bwcore.configure_logging(logger_level=bwcore.log_utils.INFO)
+logger = bwcore.get_logger()
+
+from bwcore.utils import debug_utils, file_utils
+# import bwcore.modelling
+# import bwcore.modelling.idefics2 as idefics2
+# import bwcore.modelling.conversation_processor
 
 
 DEVICE = "cuda:0"
-EVAL_BATCH_SIZE = 1     # keep it at 1
-SEED = 124124
+# EVAL_BATCH_SIZE = 1     # keep it at 1
+SEED = bwcore.configs._SEED
 
 
 def collate_fn(batch):
@@ -108,15 +106,7 @@ def main(args):
         args.conv_mode = args.conv_mode + '_mmtag'
         print(f'It seems that this is a plain model, but it is not using a mmtag prompt, auto switching to {args.conv_mode}.')
 
-    _generated_data_path = os.path.join(os.environ['UNITY_DATA_DIR'], '576p')
-    _block_world_data_path = os.path.join(os.environ['UNITY_DATA_DIR'].replace(
-        'generated_data', 'datasets'), 'BlockWorld-Random')
-
-    # original_entries = data_utils.BWEntrySet.from_original_entries(
-    #     generated_data_path=_generated_data_path,
-    #     block_world_path=_block_world_data_path)
-
-    test_dataset = data_utils.get_dataset(args.test_dataset, _generated_data_path, _block_world_data_path)
+    test_dataset = bwcore.data.get_bw_dataset(args.test_dataset)
 
     # read input test data
     with open(os.path.join('/users/fjc3/sharedscratch/datasets/llava', args.turn_masking, f"{args.test_dataset}-{args.goal}-test.json"), 'r') as f:
@@ -162,7 +152,7 @@ def main(args):
                 logger.info(f"Input prompt: \n```{decoded_input_prompt}```")
                 logger.info(f"Generated text: \n```{generated_text}```")
 
-            predictions.append(data_utils.Idefics2Prediction.from_model_output(
+            predictions.append(bwcore.data.Idefics2Prediction.from_model_output(
                 test_dataset.get_entry_by_idx(idx), generated_text, args.goal))
             all_responses.append({
                 'entry_idx': idx,
@@ -170,34 +160,28 @@ def main(args):
                 'input_messages': entry['conversations'],
                 'input_prompt': decoded_input_prompt,
                 # 'input_labels': debug_utils.decode_label_ids(labels[index], processor=processor),
-                'model_response': generated_text,
-                'true_answer': entry['answer']
+                'model_output_string': generated_text,
+                'true_string': entry['answer']
             })
 
-            # evaluation.print_evaluation_table(
-            #     evaluation.evaluate_predictions(predictions, True))
-
-            logger.debug(evaluation.get_training_evaluation_str(predictions, total_entries=len(data_loader)))
+            logger.debug(bwcore.evaluation.get_training_evaluation_str(predictions, total_entries=len(data_loader)))
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user, saving the results so far")
 
-    evaluation.print_evaluation_table(evaluation.evaluate_predictions(predictions, include_subsets_by_type=True))
+    bwcore.evaluation.print_evaluation_table(bwcore.evaluation.evaluate_predictions(predictions, include_subsets_by_type=True))
     if args.model_base is None:
         args.model_base = model_name
-    output_file = evaluation.save_model_outputs(
-        info=args.__dict__,
-        responses=all_responses)
-    logger.info(f"Responses saved to '{output_file}',")
-    logger.info(args)
-    evaluation.eval_output_file(output_file, test_dataset)
+
+    output_file = file_utils.save_model_outputs(config, all_responses, epoch=0)
+    bwcore.evaluation.eval_output_file(output_file, test_dataset)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_load", type=str, default="lora", choices=['qlora', 'lora'])
-    parser.add_argument("--model_task", type=str, required=True, choices=['zeroshot', 'finetune', 'fewshot-1', 'fewshot-2', 'fewshot-3', 'fewshot-4', 'fewshot-5'])
-    parser.add_argument("--train_dataset", type=str, required=True)
+    parser.add_argument("--model_task", type=str)
+    # parser.add_argument("--train_dataset", type=str, required=True)
     parser.add_argument("--test_dataset", type=str, required=True)
     parser.add_argument("--goal", type=str, required=True, choices=['source', 'target'])
     parser.add_argument("--turn_masking", type=str, choices=['none', 'assistant', 'all'], default='none')
@@ -216,6 +200,7 @@ if __name__ == "__main__":
     parser.add_argument("--top_p", type=float, default=None)
     parser.add_argument("--num_beams", type=int, default=1)
     parser.add_argument("--max_new_tokens", type=int, default=128)
+    parser.add_argument("--deterministic", type=bool, default=False)
     args = parser.parse_args()
     # args.goal = 'source' if 'source' in args.question_file else 'target'
 
@@ -228,6 +213,8 @@ if __name__ == "__main__":
         logger.info(f"Loading fine-tuned model: {args.model_path}")
     else:
         logger.info(f"Zero-shot evaluation with model: {args.model_path}")
+
+    config = bwcore.configs.parse_configs_from_args(args, mapping={'base_model': 'model_path', 'load_model': 'model_load', 'task': 'model_task'})
 
     main(args)
 

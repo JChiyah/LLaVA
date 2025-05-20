@@ -1,3 +1,4 @@
+# Adopted from https://github.com/liuhaotian/LLaVA to work with the BlockWorld-Repairs dataset
 # Adopted from https://github.com/lm-sys/FastChat. Below is the original copyright:
 # Adopted from tatsu-lab@stanford_alpaca. Below is the original copyright:
 #    Copyright 2023 Rohan Taori, Ishaan Gulrajani, Tianyi Zhang, Yann Dubois, Xuechen Li
@@ -38,9 +39,15 @@ from llava.mm_utils import tokenizer_image_token
 
 from PIL import Image
 
+# JChiyah: this assumes that LLaVA is a submodule of the blockworld-repairs repo
+# Get script directory
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# Add the blockworld-repairs/src directory to Python path (three level up from this script)
+sys.path.append(os.path.join(os.path.dirname(script_dir),  '..', '..', 'src'))
 
-sys.path.append('../')
-from bw_modelling import debug_utils, data_modelling
+import bwcore
+from bwcore.utils import debug_utils
+import bwcore.modelling.conversation_processor
 
 
 local_rank = None
@@ -752,7 +759,7 @@ class LazySupervisedDataset(Dataset):
             print(f"Decoded labels: {debug_utils.decode_label_ids(data_dict['labels'][0], tokenizer=self.tokenizer)}")
             print(f"labels: {data_dict['labels'][0]}")
 
-        data_dict['labels'] = data_modelling.get_masked_labels(
+        data_dict['labels'] = bwcore.modelling.conversation_processor.get_masked_labels(
             data_dict['input_ids'], sources, self.tokenizer,
             role_tokens=[('system', '<s>'), ('user', 'USER'), ('assistant', 'ASSISTANT')],
             token_ids_to_mask=[IMAGE_TOKEN_INDEX])

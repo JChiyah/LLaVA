@@ -8,7 +8,7 @@ test_dataset=$3
 mask=$4
 model_base=$5
 
-echo "scripts/v1_5/finetune_task_lora.sh $@"
+# echo "scripts/v1_5/finetune_task_lora.sh $@"
 
 
 # make sure goal is 'source' or 'target'
@@ -23,15 +23,16 @@ model_short="${model_base#*/}"
 
 output_dir=/users/fjc3/sharedscratch/checkpoints/llava/$timestamp-$model_short-lora-${train_dataset}-${goal}
 
-echo 'starting!'
+readonly LLAVA_ROOT="$(dirname "$0")/../.."
 
-WANDB_MODE=offline deepspeed llava/train/train_mem.py \
+
+WANDB_MODE=offline deepspeed $LLAVA_ROOT/llava/train/train_mem.py \
     --lora_enable True \
     --lora_r 128 \
     --lora_alpha 256 \
     --mm_projector_lr 2e-5 \
     --tune_mm_mlp_adapter True \
-    --deepspeed ./scripts/zero3.json \
+    --deepspeed $LLAVA_ROOT/scripts/zero3.json \
     --model_name_or_path $model_base \
     --version v1_bw_${goal} \
     --data_path /users/fjc3/sharedscratch/datasets/llava/${mask}/${train_dataset}-${goal}-train.json \
@@ -67,30 +68,32 @@ WANDB_MODE=offline deepspeed llava/train/train_mem.py \
     --turn_masking $mask \
     --prompt_task_instruction system
 #    --report_to wandb
-
-echo "Done finetuning, model in $output_dir"
 #    --data_path ./playground/data/llava_v1_5_mix665k.json \
 #    --image_folder ./playground/data \
 #    --bits 4 \
 # --lora_r 128 --lora_alpha 256 --mm_projector_lr 2e-5
+
+# echo "Done finetuning, model in $output_dir"
+
+echo $output_dir
+
 
 #echo "sh scripts/v1_5/eval_task_lora.sh finetune $goal $train_dataset $test_dataset $mask $output_dir $model_base"
 #sh scripts/v1_5/eval_task_lora.sh finetune $goal $train_dataset $test_dataset $mask $output_dir $model_base
 
 # Evaluate in all test datasets, saving some time
 # (fixed_original_test_instructions fixed_original_test_corrections)
-test_datasets=(fixed_original_test_instructions fixed_original_test_corrections)
+# test_datasets=(fixed_original_test)
 
-for test_dataset in "${test_datasets[@]}"; do
-    cd ..
-    python convert_to_llava.py --output_dir /users/fjc3/sharedscratch/datasets/llava/$mask --dataset $test_dataset --turn_masking $mask
+# for test_dataset in "${test_datasets[@]}"; do
+#     # cd ..
+#     # python $LLAVA_ROOT/../src/convert_to_llava.py --output_dir /users/fjc3/sharedscratch/datasets/llava/$mask --dataset $test_dataset --turn_masking $mask
 
-    cd LLaVA/
-    echo "sh scripts/v1_5/eval_task_lora.sh finetune $goal $train_dataset $test_dataset $mask $output_dir $model_base"
-    sh scripts/v1_5/eval_task_lora.sh finetune $goal $train_dataset $test_dataset $mask $output_dir $model_base
+#     # cd LLaVA/
+#     echo "sh $LLAVA_ROOT/scripts/v1_5/eval_task_lora.sh finetune $goal $train_dataset $test_dataset $mask $output_dir $model_base"
+#     sh $LLAVA_ROOT/scripts/v1_5/eval_task_lora.sh finetune $goal $train_dataset $test_dataset $mask $output_dir $model_base
 
-done
+# done
 
 
-
-echo 'Done with finetune_task_lora.sh!'
+# echo 'Done with finetune_task_lora.sh!'
